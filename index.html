@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Coordinator Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            touch-action: none;
+        }
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            max-width: 100vw;
+            max-height: 100vh;
+            aspect-ratio: 4/3;
+        }
+        canvas {
+            display: block;
+            background-color: #000;
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        #mobileControls {
+            position: absolute;
+            bottom: 10px;
+            left: 0;
+            width: 100%;
+            display: none;
+            justify-content: space-between;
+            padding: 0 40px;
+        }
+        .controlBtn {
+            width: 0;
+            height: 0;
+            border-style: solid;
+            opacity: 0.7;
+            touch-action: none;
+        }
+        #btnUp {
+            border-width: 0 20px 25px 20px;
+            border-color: transparent transparent #88ff88 transparent;
+            margin: 0 auto 15px auto;
+        }
+        #btnLeft {
+            border-width: 20px 25px 20px 0;
+            border-color: transparent #88ff88 transparent transparent;
+        }
+        #btnDown {
+            border-width: 25px 20px 0 20px;
+            border-color: #88ff88 transparent transparent transparent;
+        }
+        #btnRight {
+            border-width: 20px 0 20px 25px;
+            border-color: transparent transparent transparent #88ff88;
+        }
+        .controlArea {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .rowControls {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="mobileControls">
+            <div class="controlArea">
+                <div id="btnUp" class="controlBtn"></div>
+                <div class="rowControls">
+                    <div id="btnLeft" class="controlBtn"></div>
+                    <div id="btnDown" class="controlBtn"></div>
+                    <div id="btnRight" class="controlBtn"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game Settings
+        const TILE_SIZE = 32;
+        const GRID_WIDTH = 16;
+        const GRID_HEIGHT = 16;
+        const CANVAS_WIDTH = TILE_SIZE * GRID_WIDTH;
+        const CANVAS_HEIGHT = TILE_SIZE * GRID_HEIGHT;
+        
+        // Game States
+        const STATE_INTRO = 0;
+        const STATE_PLAYING = 1;
+        const STATE_GAME_OVER = 2;
+        const STATE_LEVEL_COMPLETE = 3;
+        
+        // Game variables
+        let canvas, ctx;
+        let gameState = STATE_INTRO;
+        let currentLevel = 1;
+        let maxLevel = 3;
+        let lives = 3;
+        let score = 0;
+        let introTimer = 0;
+        let gameOverTimer = 0;
+        let levelCompleteTimer = 0;
+        let player = {
+            x: GRID_WIDTH / 2,
+            y: GRID_HEIGHT - 2,
+            width: 1,
+            height: 1,
+            frame: 0,
+            frameCount: 2,
+            frameDelay: 10,
+            frameTimer: 0
+        };
+        
+        let documents = [];
+        const documentTypes = ["RDM", "REFILL", "CALL", "PI", "VSE"];
+        const documentColors = ["#ff8888", "#88ff88", "#8888ff", "#ffff88", "#ff88ff"];
+        
+        // Keyboard state
+        const keys = {
+            up: false,
+            down: false,
+            left: false,
+            right: false
+        };
+        
+        // Initialize game
+        function init() {
+            canvas = document.getElementById("gameCanvas");
+            ctx = canvas.getContext("2d");
+            
+            // Set canvas resolution to match game grid (will be scaled with CSS)
+            canvas.width = CANVAS_WIDTH;
+            canvas.height = CANVAS_HEIGHT;
+            
+            // Check if mobile
+            checkMobile();
+            
+            // Set up event listeners
+            window.addEventListener("keydown", handleKeyDown);
+            window.addEventListener("keyup", handleKeyUp);
+            window.addEventListener("resize", checkMobile);
+            
+            // Set up mobile controls
+            setupMobileControls();
+            
+            // Reset game
+            resetGame();
+            
+            // Start game loop
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Check if mobile and display mobile controls if needed
+        function checkMobile() {
+            const mobileControls = document.getElementById("mobileControls");
+            if (window.innerWidth <= 800 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+                mobileControls.style.display = "flex";
+            } else {
+                mobileControls.style.display = "none";
+            }
+        }
+        
+        // Set up mobile controls
+        function setupMobileControls() {
+            const btnUp = document.getElementById("btnUp");
+            const btnDown = document.getElementById("btnDown");
+            const btnLeft = document.getElementById("btnLeft");
+            const btnRight = document.getElementById("btnRight");
+            
+            // Touch events for Up button
+            btnUp.addEventListener("touchstart", function(e) {
+                e.preventDefault();
+                keys.up = true;
+            });
+            btnUp.addEventListener("touchend", function(e) {
+                e.preventDefault();
+                keys.up = false;
+            });
+            
+            // Touch events for Down button
+            btnDown.addEventListener("touchstart", function(e) {
+                e.preventDefault();
+                keys.down = true;
+            });
+            btnDown.addEventListener("touchend", function(e) {
+                e.preventDefault();
+                keys.down = false;
+            });
+            
+            // Touch events for Left button
+            btnLeft.addEventListener("touchstart", function(e) {
+                e.preventDefault();
+                keys.left = true;
+            });
+            btnLeft.addEventListener("touchend", function(e) {
+                e.preventDefault();
+                keys.left = false;
+            });
+            
+            // Touch events for Right button
+            btnRight.addEventListener("touchstart", function(e) {
+                e.preventDefault();
+                keys.right = true;
+            });
+            btnRight.addEventListener("touchend", function(e) {
+                e.preventDefault();
+                keys.right = false;
+            });
+        }
+        
+        // Handle keyboard input
+        function handleKeyDown(e) {
+            switch(e.key) {
+                case "ArrowUp":
+                case "w":
+                    keys.up = true;
+                    break;
+                case "ArrowDown":
+                case "s":
+                    keys.down = true;
+                    break;
+                case "ArrowLeft":
+                case "a":
+                    keys.left = true;
+                    break;
+                case "ArrowRight":
+                case "d":
+                    keys.right = true;
+                    break;
+                case " ":
+                    if (gameState === STATE_INTRO || gameState === STATE_GAME_OVER) {
+                        resetGame();
+                        gameState = STATE_PLAYING;
+                    }
+                    break;
+            }
+        }
+        
+        function handleKeyUp(e) {
+            switch(e.key) {
+                case "ArrowUp":
+                case "w":
+                    keys.up = false;
+                    break;
+                case "ArrowDown":
+                case "s":
+                    keys.down = false;
+                    break;
+                case "ArrowLeft":
+                case "a":
+                    keys.left = false;
+                    break;
+                case "ArrowRight":
+                case "d":
+                    keys.right = false;
+                    break;
+            }
+        }
+        
+        // Reset game state
+        function resetGame() {
+            player.x = GRID_WIDTH / 2;
+            player.y = GRID_HEIGHT - 2;
+            lives = 3;
+            score = 0;
+            currentLevel = 1;
+            initLevel(currentLevel);
+        }
+        
+        // Initialize level with documents based on difficulty
+        function initLevel(level) {
+            documents = [];
+            
+            // Number of document lanes increases with level
+            const numLanes = 2 + level;
+            
+            // Space between first lane and last lane
+            const laneSpacing = (GRID_HEIGHT - 6) / (numLanes + 1);
+            
+            for (let lane = 0; lane < numLanes; lane++) {
+                const y = 2 + laneSpacing * (lane + 1);
+                const direction = lane % 2 === 0 ? 1 : -1;
+                const speed = 0.02 + (level * 0.01) + (lane * 0.005);
+                const numDocs = 2 + Math.floor(Math.random() * 3);
+                
+                // Create documents for this lane
+                for (let i = 0; i < numDocs; i++) {
+                    const spacing = GRID_WIDTH / numDocs;
+                    const offset = spacing * i + Math.random() * (spacing * 0.5);
+                    const docType = Math.floor(Math.random() * documentTypes.length);
+                    
+                    documents.push({
+                        x: direction > 0 ? -2 + offset : GRID_WIDTH + 2 - offset,
+                        y: Math.floor(y),
+                        width: 2,
+                        height: 1,
+                        speed: speed * direction,
+                        type: docType,
+                        text: documentTypes[docType],
+                        color: documentColors[docType]
+                    });
+                }
+            }
+        }
+        
+        // Main game loop
+        function gameLoop(timestamp) {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Update game state
+        function update() {
+            switch(gameState) {
+                case STATE_INTRO:
+                    updateIntro();
+                    break;
+                case STATE_PLAYING:
+                    updatePlaying();
+                    break;
+                case STATE_GAME_OVER:
+                    updateGameOver();
+                    break;
+                case STATE_LEVEL_COMPLETE:
+                    updateLevelComplete();
+                    break;
+            }
+        }
+        
+        // Update intro screen
+        function updateIntro() {
+            introTimer++;
+            if (introTimer > 180) { // 3 seconds at 60fps
+                if (keys.up || keys.down || keys.left || keys.right) {
+                    gameState = STATE_PLAYING;
+                    introTimer = 0;
+                }
+            }
+        }
+        
+        // Update playing state
+        function updatePlaying() {
+            // Update player animation
+            player.frameTimer++;
+            if (player.frameTimer > player.frameDelay) {
+                player.frame = (player.frame + 1) % player.frameCount;
+                player.frameTimer = 0;
+            }
+            
+            // Handle player movement
+            let moved = false;
+            if (keys.up && player.y > 1) {
+                player.y -= 1;
+                moved = true;
+            } else if (keys.down && player.y < GRID_HEIGHT - 2) {
+                player.y += 1;
+                moved = true;
+            } else if (keys.left && player.x > 0) {
+                player.x -= 1;
+                moved = true;
+            } else if (keys.right && player.x < GRID_WIDTH - 1) {
+                player.x += 1;
+                moved = true;
+            }
+            
+            // Only check collisions after a move
+            if (moved) {
+                // Reset keys to prevent continuous movement
+                keys.up = keys.down = keys.left = keys.right = false;
+                
+                // Check if player reached the badge clock
+                if (player.y <= 1) {
+                    score += 100 * currentLevel;
+                    if (currentLevel < maxLevel) {
+                        currentLevel++;
+                        gameState = STATE_LEVEL_COMPLETE;
+                        levelCompleteTimer = 0;
+                        // We'll reset player position in updateLevelComplete
+                    } else {
+                        // Win the game
+                        score += 1000;
+                        gameState = STATE_GAME_OVER;
+                        gameOverTimer = 0;
+                    }
+                    return;
+                }
+            }
+            
+            // Update documents
+            for (let doc of documents) {
+                doc.x += doc.speed;
+                
+                // Wrap documents around screen
+                if (doc.speed > 0 && doc.x > GRID_WIDTH + 2) {
+                    doc.x = -2;
+                } else if (doc.speed < 0 && doc.x < -2) {
+                    doc.x = GRID_WIDTH + 2;
+                }
+                
+                // Check collision with player
+                if (rectsOverlap(
+                    player.x, player.y, player.width, player.height,
+                    doc.x, doc.y, doc.width, doc.height
+                )) {
+                    lives--;
+                    player.x = GRID_WIDTH / 2;
+                    player.y = GRID_HEIGHT - 2;
+                    
+                    if (lives <= 0) {
+                        gameState = STATE_GAME_OVER;
+                        gameOverTimer = 0;
+                    }
+                    return;
+                }
+            }
+        }
+        
+        // Update game over screen
+        function updateGameOver() {
+            gameOverTimer++;
+            if (gameOverTimer > 180) { // 3 seconds at 60fps
+                if (keys.up || keys.down || keys.left || keys.right) {
+                    gameState = STATE_INTRO;
+                    introTimer = 0;
+                }
+            }
+        }
+        
+        // Update level complete screen
+        function updateLevelComplete() {
+            // Disable player controls during level transition
+            keys.up = keys.down = keys.left = keys.right = false;
+            
+            levelCompleteTimer++;
+            if (levelCompleteTimer > 180) { // 3 seconds at 60fps
+                gameState = STATE_PLAYING;
+                // Reset player position for the next level
+                player.x = GRID_WIDTH / 2;
+                player.y = GRID_HEIGHT - 2;
+                initLevel(currentLevel);
+            }
+        }
+        
+        // Draw game
+        function draw() {
+            // Clear canvas
+            ctx.fillStyle = "#333366";
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            switch(gameState) {
+                case STATE_INTRO:
+                    drawIntro();
+                    break;
+                case STATE_PLAYING:
+                    drawPlaying();
+                    break;
+                case STATE_GAME_OVER:
+                    drawGameOver();
+                    break;
+                case STATE_LEVEL_COMPLETE:
+                    drawLevelComplete();
+                    break;
+            }
+        }
+        
+        // Draw intro screen
+        function drawIntro() {
+            // Credit - spostato sopra al titolo
+            ctx.fillStyle = "#88ff88";
+            ctx.font = "10px 'Courier New'";
+            ctx.textAlign = "center";
+            ctx.fillText("VINCENZO SALVIA PRESENTS", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 6 - 15);
+            
+            // Title
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "16px 'Courier New'";
+            ctx.fillText("DEMO COORDINATOR", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 6 + 15);
+            ctx.fillText("SIMULATOR", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 6 + 35);
+            
+            // Instructions
+            if (introTimer > 60) {
+                const alpha = Math.sin(introTimer * 0.05) * 0.5 + 0.5;
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.font = "12px 'Courier New'";
+                ctx.fillText("PRESS ANY ARROW KEY TO START", CANVAS_WIDTH / 2, CANVAS_HEIGHT * 3/4);
+            }
+            
+            // Draw player character
+            drawOfficeWorker(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, 3);
+            
+            // Draw some floating documents
+            for (let i = 0; i < 5; i++) {
+                const x = CANVAS_WIDTH * (0.3 + 0.1 * i);
+                const y = CANVAS_HEIGHT * (0.3 + 0.05 * Math.sin(introTimer * 0.05 + i));
+                drawDocument(x, y, 2, i % documentTypes.length);
+            }
+        }
+        
+        // Draw playing state
+        function drawPlaying() {
+            // Draw office floor tiles
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    ctx.fillStyle = (x + y) % 2 === 0 ? "#444455" : "#3a3a4a";
+                    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
+            }
+            
+            // Draw goal (badge clock)
+            drawBadgeClock();
+            
+            // Draw documents
+            for (let doc of documents) {
+                drawDocument(
+                    doc.x * TILE_SIZE, 
+                    doc.y * TILE_SIZE, 
+                    doc.width, 
+                    doc.type
+                );
+            }
+            
+            // Draw player
+            drawOfficeWorker(
+                player.x * TILE_SIZE, 
+                player.y * TILE_SIZE, 
+                1
+            );
+            
+            // Draw HUD
+            drawHUD();
+        }
+        
+        // Draw game over screen
+        function drawGameOver() {
+            // Game over text
+            ctx.fillStyle = "#ff5555";
+            ctx.font = "24px 'Courier New'";
+            ctx.textAlign = "center";
+            ctx.fillText("GAME OVER", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 3);
+            
+            // Score
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "16px 'Courier New'";
+            ctx.fillText(`FINAL SCORE: ${score}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+            
+            // Restart
+            if (gameOverTimer > 60) {
+                const alpha = Math.sin(gameOverTimer * 0.05) * 0.5 + 0.5;
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.font = "12px 'Courier New'";
+                ctx.fillText("PRESS ANY ARROW KEY TO RESTART", CANVAS_WIDTH / 2, CANVAS_HEIGHT * 2/3);
+            }
+        }
+        
+        // Draw level complete screen
+        function drawLevelComplete() {
+            // Overlay background
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            // Level complete box
+            const boxWidth = CANVAS_WIDTH * 0.8;
+            const boxHeight = CANVAS_HEIGHT * 0.6;
+            const boxX = (CANVAS_WIDTH - boxWidth) / 2;
+            const boxY = (CANVAS_HEIGHT - boxHeight) / 2;
+            
+            ctx.fillStyle = "#333366";
+            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+            
+            // Box border
+            ctx.strokeStyle = "#88ff88";
+            ctx.lineWidth = 4;
+            ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+            
+            // Level complete text
+            ctx.fillStyle = "#88ff88";
+            ctx.font = "24px 'Courier New'";
+            ctx.textAlign = "center";
+            ctx.fillText(`LEVEL ${currentLevel-1} COMPLETE!`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
+            
+            // Score bonus
+            const bonus = 100 * (currentLevel - 1);
+            ctx.fillStyle = "#ffff88";
+            ctx.font = "16px 'Courier New'";
+            ctx.fillText(`BONUS: ${bonus} POINTS`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+            
+            // Next level text
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "18px 'Courier New'";
+            ctx.fillText(`GET READY FOR LEVEL ${currentLevel}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
+            
+            // Show progress bar
+            const progressWidth = (levelCompleteTimer / 180) * (boxWidth - 40);
+            ctx.fillStyle = "#88ff88";
+            ctx.fillRect(boxX + 20, boxY + boxHeight - 40, progressWidth, 20);
+            
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(boxX + 20, boxY + boxHeight - 40, boxWidth - 40, 20);
+        }
+        
+        // Draw HUD
+        function drawHUD() {
+            // Draw score
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "12px 'Courier New'";
+            ctx.textAlign = "left";
+            ctx.fillText(`SCORE: ${score}`, 10, 20);
+            
+            // Draw level - spostato sotto score
+            ctx.fillText(`LEVEL: ${currentLevel}`, 10, 36);
+            
+            // Draw lives
+            ctx.textAlign = "right";
+            ctx.fillText(`LIVES: ${lives}`, CANVAS_WIDTH - 10, 20);
+        }
+        
+        // Draw office worker (player)
+        function drawOfficeWorker(x, y, scale) {
+            const width = TILE_SIZE * scale;
+            const height = TILE_SIZE * scale;
+            
+            // Body (shirt)
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(x + width * 0.2, y + height * 0.3, width * 0.6, height * 0.35);
+            
+            // Suit jacket
+            ctx.fillStyle = "#223366";
+            ctx.fillRect(x + width * 0.15, y + height * 0.3, width * 0.2, height * 0.35);
+            ctx.fillRect(x + width * 0.65, y + height * 0.3, width * 0.2, height * 0.35);
+            
+            // Tie
+            ctx.fillStyle = "#dd3333";
+            ctx.fillRect(x + width * 0.45, y + height * 0.3, width * 0.1, height * 0.3);
+            ctx.beginPath();
+            ctx.moveTo(x + width * 0.45, y + height * 0.6);
+            ctx.lineTo(x + width * 0.5, y + height * 0.65);
+            ctx.lineTo(x + width * 0.55, y + height * 0.6);
+            ctx.fill();
+            
+            // Head
+            ctx.fillStyle = "#ffccaa";
+            ctx.fillRect(x + width * 0.3, y + height * 0.1, width * 0.4, height * 0.25);
+            
+            // Hair
+            ctx.fillStyle = "#553322";
+            ctx.fillRect(x + width * 0.3, y + height * 0.1, width * 0.4, height * 0.08);
+            
+            // Eyes
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(x + width * 0.35, y + height * 0.2, width * 0.08, height * 0.05);
+            ctx.fillRect(x + width * 0.57, y + height * 0.2, width * 0.08, height * 0.05);
+            
+            // Mouth
+            ctx.fillStyle = "#bb5555";
+            ctx.fillRect(x + width * 0.4, y + height * 0.28, width * 0.2, height * 0.02);
+            
+            // Arms
+            if (player.frame === 0) {
+                // Left arm
+                ctx.fillStyle = "#223366";
+                ctx.fillRect(x + width * 0.05, y + height * 0.35, width * 0.15, height * 0.1);
+                // Right arm
+                ctx.fillRect(x + width * 0.8, y + height * 0.35, width * 0.15, height * 0.1);
+                // Hands
+                ctx.fillStyle = "#ffccaa";
+                ctx.fillRect(x, y + height * 0.35, width * 0.05, height * 0.1);
+                ctx.fillRect(x + width * 0.95, y + height * 0.35, width * 0.05, height * 0.1);
+            } else {
+                // Left arm
+                ctx.fillStyle = "#223366";
+                ctx.fillRect(x + width * 0.1, y + height * 0.4, width * 0.15, height * 0.1);
+                // Right arm
+                ctx.fillRect(x + width * 0.75, y + height * 0.4, width * 0.15, height * 0.1);
+                // Hands
+                ctx.fillStyle = "#ffccaa";
+                ctx.fillRect(x + width * 0.05, y + height * 0.4, width * 0.05, height * 0.1);
+                ctx.fillRect(x + width * 0.9, y + height * 0.4, width * 0.05, height * 0.1);
+            }
+            
+            // Pants
+            ctx.fillStyle = "#333333";
+            ctx.fillRect(x + width * 0.3, y + height * 0.65, width * 0.4, height * 0.1);
+            
+            // Legs
+            ctx.fillStyle = "#333333";
+            ctx.fillRect(x + width * 0.25, y + height * 0.75, width * 0.2, height * 0.25);
+            ctx.fillRect(x + width * 0.55, y + height * 0.75, width * 0.2, height * 0.25);
+            
+            // Shoes
+            ctx.fillStyle = "#111111";
+            ctx.fillRect(x + width * 0.2, y + height * 0.95, width * 0.25, height * 0.05);
+            ctx.fillRect(x + width * 0.55, y + height * 0.95, width * 0.25, height * 0.05);
+        }
+        
+        // Draw document
+        function drawDocument(x, y, width, type) {
+            const docWidth = TILE_SIZE * width;
+            const docHeight = TILE_SIZE;
+            
+            // Document background
+            ctx.fillStyle = documentColors[type];
+            ctx.fillRect(x, y, docWidth, docHeight);
+            
+            // Document fold
+            ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+            ctx.beginPath();
+            ctx.moveTo(x + docWidth * 0.8, y);
+            ctx.lineTo(x + docWidth, y);
+            ctx.lineTo(x + docWidth, y + docHeight * 0.2);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Document text
+            ctx.fillStyle = "#000000";
+            ctx.font = "10px 'Courier New'";
+            ctx.textAlign = "center";
+            ctx.fillText(documentTypes[type], x + docWidth/2, y + docHeight * 0.6);
+        }
+        
+        // Draw badge clock
+        function drawBadgeClock() {
+            // Badge clock area
+            ctx.fillStyle = "#886644";
+            ctx.fillRect(0, 0, CANVAS_WIDTH, TILE_SIZE * 1.5);
+            
+            // Clock
+            const clockX = CANVAS_WIDTH / 2;
+            const clockY = TILE_SIZE * 0.75;
+            const clockRadius = TILE_SIZE * 0.6;
+            
+            ctx.fillStyle = "#dddddd";
+            ctx.beginPath();
+            ctx.arc(clockX, clockY, clockRadius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Clock border
+            ctx.strokeStyle = "#000000";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(clockX, clockY, clockRadius, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Clock hands
+            ctx.strokeStyle = "#000000";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(clockX, clockY);
+            ctx.lineTo(clockX, clockY - clockRadius * 0.6);
+            ctx.stroke();
+            
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(clockX, clockY);
+            ctx.lineTo(clockX + clockRadius * 0.4, clockY);
+            ctx.stroke();
+            
+            // Badge slot
+            for (let i = 0; i < 5; i++) {
+                // Salta lo slot centrale (sotto l'orologio)
+                if (i === 2) continue;
+                
+                const slotX = CANVAS_WIDTH / 5 * (i + 0.5);
+                ctx.fillStyle = "#555555";
+                ctx.fillRect(slotX - TILE_SIZE * 0.5, TILE_SIZE * 0.3, TILE_SIZE, TILE_SIZE * 0.4);
+                
+                ctx.fillStyle = "#333333";
+                ctx.fillRect(slotX - TILE_SIZE * 0.4, TILE_SIZE * 0.4, TILE_SIZE * 0.8, TILE_SIZE * 0.2);
+            }
+        }
+        
+        // Collision detection
+        function rectsOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
+            return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+        }
+        
+        // Start the game when the page loads
+        window.onload = init;
+    </script>
+</body>
+</html>
